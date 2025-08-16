@@ -513,7 +513,7 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    mode: 'cors', // Aggiunto per CORS
+                    mode: 'cors',
                     body: JSON.stringify({
                         action: 'test'
                     })
@@ -537,7 +537,6 @@
                 aggiornaStatoSync('❌ Offline');
                 abilitaFunzioni(false);
                 
-                // Messaggio di errore più dettagliato
                 let errorMsg = 'Errore di connessione a Google Sheets.\n\n';
                 
                 if (error.name === 'TypeError' && error.message.includes('fetch')) {
@@ -594,7 +593,6 @@
                 return;
             }
 
-            // Validazione formato ID operatore (opzionale)
             if (operatore.length < 2) {
                 mostraMessaggio('❌ ID operatore troppo corto (minimo 2 caratteri)', 'error');
                 return;
@@ -607,7 +605,6 @@
                 return;
             }
             
-            // Disabilita il pulsante durante l'invio
             const btnRegistra = document.getElementById('btnRegistra');
             btnRegistra.disabled = true;
             btnRegistra.textContent = '⏳ Salvando...';
@@ -636,17 +633,14 @@
                 const result = await response.json();
                 
                 if (result.success) {
-                    // Salva profilo operatore per utilizzi futuri
                     profiliOperatori[operatore] = {
                         campo, magazzino, prodotto, tara: tara.toString()
                     };
 
-                    // Pulisci solo il peso lordo, mantieni gli altri dati
                     document.getElementById('pesoLordo').value = '';
                     
                     mostraMessaggio(`✅ Pesata registrata per ${operatore}! Peso netto: ${pesoNetto}kg`, 'success');
                     
-                    // Aggiorna i dati
                     caricaDatiCompleti();
                 } else {
                     throw new Error(result.error || 'Errore durante il salvataggio');
@@ -655,7 +649,6 @@
                 console.error('Errore:', error);
                 mostraMessaggio('❌ Errore durante il salvataggio: ' + error.message, 'error');
             } finally {
-                // Riabilita il pulsante
                 btnRegistra.disabled = false;
                 btnRegistra.textContent = '📝 REGISTRA PESATA';
             }
@@ -713,7 +706,6 @@
                 return;
             }
 
-            // Ordina per data (più recenti prima)
             const pesateOrdinate = [...pesate].sort((a, b) => 
                 new Date(b.timestamp || 0) - new Date(a.timestamp || 0)
             );
@@ -733,28 +725,24 @@
             const totaleGenerale = pesate.reduce((sum, p) => sum + (p.pesoNetto || 0), 0);
             document.getElementById('totGen').textContent = Math.round(totaleGenerale);
 
-            // Totali per operatore
             const totOperatori = {};
             pesate.forEach(p => {
                 totOperatori[p.operatore] = (totOperatori[p.operatore] || 0) + (p.pesoNetto || 0);
             });
             aggiornaSezioneTotal('totOperatori', totOperatori);
 
-            // Totali per campo
             const totCampi = {};
             pesate.forEach(p => {
                 totCampi[p.campo] = (totCampi[p.campo] || 0) + (p.pesoNetto || 0);
             });
             aggiornaSezioneTotal('totCampi', totCampi);
 
-            // Totali per magazzino
             const totMagazzini = {};
             pesate.forEach(p => {
                 totMagazzini[p.magazzino] = (totMagazzini[p.magazzino] || 0) + (p.pesoNetto || 0);
             });
             aggiornaSezioneTotal('totMagazzini', totMagazzini);
 
-            // Totali per prodotto
             const totProdotti = {};
             pesate.forEach(p => {
                 totProdotti[p.prodotto] = (totProdotti[p.prodotto] || 0) + (p.pesoNetto || 0);
@@ -770,7 +758,6 @@
                 return;
             }
 
-            // Ordina per peso decrescente
             const sorted = Object.entries(totali).sort((a, b) => b[1] - a[1]);
             
             elemento.innerHTML = sorted.map(([nome, peso]) => `
@@ -784,11 +771,9 @@
         function caricaProfiloOperatore(idOperatore) {
             if (!idOperatore) return;
             
-            // Converti in maiuscolo
             const operatoreId = idOperatore.toUpperCase();
             document.getElementById('operatore').value = operatoreId;
             
-            // Carica profilo salvato se esiste
             if (profiliOperatori[operatoreId]) {
                 const profilo = profiliOperatori[operatoreId];
                 document.getElementById('campo').value = profilo.campo || '';
@@ -796,7 +781,6 @@
                 document.getElementById('prodotto').value = profilo.prodotto || '';
                 document.getElementById('tara').value = profilo.tara || '0';
                 
-                // Mostra messaggio di conferma
                 mostraMessaggio(`✅ Profilo caricato per ${operatoreId}`, 'success');
                 setTimeout(() => {
                     document.getElementById('messaggiInserimento').innerHTML = '';
@@ -821,13 +805,10 @@
         }
 
         function vaiA(schermata) {
-            // Nascondi tutte le schermate
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
             
-            // Mostra la schermata richiesta
             document.getElementById(schermata).classList.add('active');
             
-            // Aggiorna header
             const titoli = {
                 home: { title: '🌾 Gestione Raccolto', subtitle: 'Cascina Digitale - Multi Utente' },
                 inserimento: { title: '📝 Nuova Pesata', subtitle: 'Registra una pesata' },
@@ -838,7 +819,6 @@
             document.getElementById('headerTitle').textContent = titoli[schermata].title;
             document.getElementById('headerSubtitle').textContent = titoli[schermata].subtitle;
             
-            // Mostra/nascondi pulsante home
             const backBtn = document.getElementById('backBtn');
             if (schermata === 'home') {
                 backBtn.style.display = 'none';
@@ -846,7 +826,6 @@
                 backBtn.style.display = 'block';
             }
 
-            // Carica dati se necessario
             if ((schermata === 'elenco' || schermata === 'totali') && isConnected) {
                 caricaDatiCompleti();
             }
