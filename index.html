@@ -106,6 +106,26 @@
             margin-top: 5px;
         }
 
+        .config-error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            font-size: 11px;
+        }
+
+        .config-success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            font-size: 11px;
+        }
+
         /* HOME SCREEN */
         .home-menu {
             display: flex;
@@ -131,6 +151,7 @@
         .menu-card.disabled {
             opacity: 0.5;
             cursor: not-allowed;
+            background: #e9ecef;
         }
 
         .menu-icon {
@@ -315,6 +336,25 @@
             border-radius: 5px;
             margin: 10px 0;
         }
+
+        .retry-section {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+            text-align: center;
+        }
+
+        .retry-btn {
+            background: #ffc107;
+            color: #856404;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
@@ -323,7 +363,7 @@
             <button class="back-btn" onclick="tornaHome()" id="backBtn">← Home</button>
             <h1 id="headerTitle">🌾 Gestione Raccolto</h1>
             <p id="headerSubtitle">Cascina Digitale - Multi Utente</p>
-            <div class="sync-status" id="syncStatus">⚡ Offline</div>
+            <div class="sync-status" id="syncStatus">⚡ Non configurato</div>
         </div>
 
         <div class="content">
@@ -331,7 +371,8 @@
             <div class="config-panel" id="configPanel">
                 <div class="config-title">🔧 Configurazione Google Sheets</div>
                 <input type="text" id="apiUrl" class="config-input" placeholder="Inserisci l'URL API di Google Apps Script">
-                <button class="config-btn" onclick="salvaConfigurazione()">Salva e Testa Connessione</button>
+                <button class="config-btn" onclick="salvaConfigurazione()" id="configBtn">Salva e Testa Connessione</button>
+                <div id="configMessages"></div>
             </div>
 
             <!-- HOME SCREEN -->
@@ -352,7 +393,7 @@
                             <div class="stat-label">Operatori</div>
                         </div>
                     </div>
-                    <button class="config-btn" onclick="caricaDatiCompleti()" style="margin-top: 10px;">🔄 Aggiorna Ora</button>
+                    <button class="config-btn" onclick="aggiornaStats()" style="margin-top: 10px;">🔄 Aggiorna Ora</button>
                 </div>
 
                 <div class="home-menu">
@@ -401,12 +442,17 @@
 
                 <div class="form-group">
                     <label>Peso Lordo (kg)</label>
-                    <input type="number" id="pesoLordo" step="0.1" placeholder="0.0">
+                    <input type="number" id="pesoLordo" step="0.1" placeholder="0.0" onchange="calcolaPesoNetto()">
                 </div>
 
                 <div class="form-group">
                     <label>Tara (kg)</label>
-                    <input type="number" id="tara" step="0.1" value="0" placeholder="0.0">
+                    <input type="number" id="tara" step="0.1" value="0" placeholder="0.0" onchange="calcolaPesoNetto()">
+                </div>
+
+                <div class="form-group">
+                    <label>Peso Netto (kg) - Automatico</label>
+                    <input type="number" id="pesoNetto" readonly style="background: #e9ecef; font-weight: bold; color: #4CAF50;">
                 </div>
 
                 <div class="form-group">
@@ -462,103 +508,198 @@
     </div>
 
     <script>
+        // VARIABILI GLOBALI
         let pesate = [];
         let profiliOperatori = {};
         let apiUrl = '';
         let googleSheetUrl = '';
         let isConnected = false;
+        let tentativiConnessione = 0;
+        const MAX_TENTATIVI = 3;
 
-        // Carica configurazione salvata
+        // INIZIALIZZAZIONE
         window.onload = function() {
+            console.log('🚀 App avviata');
             caricaConfigurazione();
             if (apiUrl) {
                 testaConnessione();
             }
         };
 
+        // GESTIONE CONFIGURAZIONE
         function salvaConfigurazione() {
-            apiUrl = document.getElementById('apiUrl').value.trim();
+            const url = document.getElementById('apiUrl').value.trim();
             
-            if (!apiUrl) {
-                alert('Inserisci l\'URL dell\'API!');
+            if (!url) {
+                mostraMessaggioConfig('Inserisci l\'URL dell\'API!', 'error');
                 return;
             }
 
-            // Salva in memoria
+            if (!url.includes('script.google.com') || !url.includes('/exec')) {
+                mostraMessaggioConfig('URL non valido! Deve contenere "script.google.com" e finire con "/exec"', 'error');
+                return;
+            }
+
+            apiUrl = url;
             window.configData = { apiUrl: apiUrl };
             
-            // Nascondi il pannello di configurazione
-            document.getElementById('configPanel').style.display = 'none';
+            mostraMessaggioConfig('URL salvato, test connessione in corso...', 'info');
             
-            // Testa la connessione
+            // Disabilita pulsante durante il test
+            const btn = document.getElementById('configBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Testing...';
+            
             testaConnessione();
         }
 
         function caricaConfigurazione() {
-            if (window.configData) {
+            if (window.configData && window.configData.apiUrl) {
                 apiUrl = window.configData.apiUrl;
                 document.getElementById('apiUrl').value = apiUrl;
-                document.getElementById('configPanel').style.display = 'none';
+                console.log('✅ Configurazione caricata da memoria');
             }
         }
 
-        async function testaConnessione() {
-            if (!apiUrl) return;
+        function mostraMessaggioConfig(messaggio, tipo) {
+            const container = document.getElementById('configMessages');
+            const className = tipo === 'error' ? 'config-error' : 
+                            tipo === 'success' ? 'config-success' : 'config-info';
+            
+            container.innerHTML = `<div class="${className}">${messaggio}</div>`;
+            
+            if (tipo !== 'error') {
+                setTimeout(() => container.innerHTML = '', 5000);
+            }
+        }
 
+        // GESTIONE CONNESSIONE MIGLIORATA
+        async function testaConnessione() {
+            if (!apiUrl) {
+                console.warn('⚠️ URL API non configurato');
+                return;
+            }
+
+            tentativiConnessione++;
+            console.log(`🔄 Tentativo connessione #${tentativiConnessione}`);
+            
             try {
                 aggiornaStatoSync('🔄 Connessione...');
+                
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 secondi timeout
                 
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
+                        'Content-Type': 'text/plain', // Cambiato per evitare preflight CORS
                     },
-                    mode: 'cors',
                     body: JSON.stringify({
                         action: 'test'
-                    })
+                    }),
+                    signal: controller.signal
                 });
+
+                clearTimeout(timeoutId);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
 
                 const data = await response.json();
                 
                 if (data.success) {
                     isConnected = true;
+                    tentativiConnessione = 0;
                     googleSheetUrl = data.sheetUrl || '';
+                    
                     aggiornaStatoSync('✅ Online');
                     abilitaFunzioni(true);
-                    caricaDatiCompleti();
-                    mostraMessaggio('✅ Connessione riuscita!', 'success');
+                    nascondiConfigPanel();
+                    
+                    mostraMessaggioConfig('✅ Connessione riuscita! Configurazione salvata.', 'success');
+                    
+                    // Carica dati iniziali
+                    await aggiornaStats();
+                    
+                    console.log('✅ Connessione stabilita con successo');
+                    
                 } else {
-                    throw new Error(data.error || 'Errore di connessione');
+                    throw new Error(data.error || 'Risposta negativa dal server');
                 }
+                
             } catch (error) {
-                console.error('Errore connessione:', error);
+                console.error('❌ Errore connessione:', error);
                 isConnected = false;
                 aggiornaStatoSync('❌ Offline');
                 abilitaFunzioni(false);
                 
-                let errorMsg = 'Errore di connessione a Google Sheets.\n\n';
+                gestisciErroreConnessione(error);
                 
-                if (error.name === 'TypeError' && error.message.includes('fetch')) {
-                    errorMsg += '❌ PROBLEMA: Stai usando l\'app da file locale (file://)\n';
-                    errorMsg += '💡 SOLUZIONE: Carica l\'app su un server web:\n';
-                    errorMsg += '   • GitHub Pages (gratuito)\n';
-                    errorMsg += '   • Netlify (gratuito)\n';
-                    errorMsg += '   • O usa un server locale\n\n';
-                    errorMsg += 'L\'URL dell\'API sembra corretto, ma i browser bloccano\n';
-                    errorMsg += 'le richieste HTTPS da file locali per sicurezza.';
-                } else if (error.message.includes('CORS')) {
-                    errorMsg += '❌ PROBLEMA: Errore CORS\n';
-                    errorMsg += '💡 SOLUZIONE: Verifica che l\'URL dell\'API sia corretto\n';
-                    errorMsg += 'e che termini con /exec';
-                } else {
-                    errorMsg += `Dettagli errore: ${error.message}`;
-                }
-                
-                alert(errorMsg);
+            } finally {
+                // Riabilita il pulsante
+                const btn = document.getElementById('configBtn');
+                btn.disabled = false;
+                btn.textContent = 'Salva e Testa Connessione';
             }
         }
 
+        function gestisciErroreConnessione(error) {
+            let errorMsg = '';
+            
+            if (error.name === 'AbortError') {
+                errorMsg = '⏱️ TIMEOUT: Il server impiega troppo tempo a rispondere.\n';
+                errorMsg += '• Verifica la tua connessione internet\n';
+                errorMsg += '• Riprova tra qualche minuto';
+            } 
+            else if (error.message.includes('CORS')) {
+                errorMsg = '🚫 ERRORE CORS: Problema di sicurezza del browser.\n';
+                errorMsg += '• Verifica che l\'URL finisca con "/exec"\n';
+                errorMsg += '• Prova a rifare il deployment dello script Google';
+            }
+            else if (error.message.includes('Failed to fetch')) {
+                errorMsg = '🌐 ERRORE RETE: Impossibile raggiungere Google.\n';
+                errorMsg += '• Controlla la connessione internet\n';
+                errorMsg += '• Verifica che l\'URL sia corretto\n';
+                errorMsg += '• Prova da un altro browser';
+            }
+            else if (error.message.includes('HTTP 403')) {
+                errorMsg = '🔒 ACCESSO NEGATO: Permessi insufficienti.\n';
+                errorMsg += '• Verifica le impostazioni del deploy Google Apps Script\n';
+                errorMsg += '• Assicurati che sia impostato su "Anyone"';
+            }
+            else {
+                errorMsg = `❌ ERRORE: ${error.message}\n`;
+                errorMsg += '• Verifica l\'URL dell\'API\n';
+                errorMsg += '• Controlla la console del browser (F12)';
+            }
+            
+            if (tentativiConnessione < MAX_TENTATIVI) {
+                errorMsg += `\n\n🔄 Tentativo ${tentativiConnessione}/${MAX_TENTATIVI}`;
+                mostraMessaggioConfig(errorMsg, 'error');
+                
+                // Riprova automaticamente dopo 5 secondi
+                setTimeout(() => {
+                    if (tentativiConnessione < MAX_TENTATIVI) {
+                        testaConnessione();
+                    }
+                }, 5000);
+            } else {
+                errorMsg += '\n\n❌ Troppi tentativi falliti. Verifica la configurazione.';
+                mostraMessaggioConfig(errorMsg, 'error');
+                tentativiConnessione = 0;
+            }
+        }
+
+        function nascondiConfigPanel() {
+            document.getElementById('configPanel').style.display = 'none';
+        }
+
+        function mostraConfigPanel() {
+            document.getElementById('configPanel').style.display = 'block';
+        }
+
+        // GESTIONE STATO INTERFACCIA
         function aggiornaStatoSync(stato) {
             document.getElementById('syncStatus').textContent = stato;
         }
@@ -575,9 +716,20 @@
             });
         }
 
+        // CALCOLO PESO NETTO AUTOMATICO
+        function calcolaPesoNetto() {
+            const pesoLordo = parseFloat(document.getElementById('pesoLordo').value) || 0;
+            const tara = parseFloat(document.getElementById('tara').value) || 0;
+            const pesoNetto = pesoLordo - tara;
+            
+            document.getElementById('pesoNetto').value = pesoNetto > 0 ? pesoNetto.toFixed(1) : '0.0';
+        }
+
+        // REGISTRAZIONE PESATA
         async function registraPesata() {
             if (!isConnected) {
-                alert('Non connesso a Google Sheets!');
+                mostraMessaggio('❌ Non connesso a Google Sheets! Configura prima l\'API.', 'error');
+                mostraConfigPanel();
                 return;
             }
 
@@ -588,8 +740,9 @@
             const tara = parseFloat(document.getElementById('tara').value) || 0;
             const prodotto = document.getElementById('prodotto').value.trim();
 
+            // Validazione
             if (!operatore || !campo || !magazzino || pesoLordo <= 0 || !prodotto) {
-                mostraMessaggio('❌ Compila tutti i campi! L\'ID operatore è obbligatorio.', 'error');
+                mostraMessaggio('❌ Compila tutti i campi obbligatori!', 'error');
                 return;
             }
 
@@ -613,7 +766,7 @@
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
+                        'Content-Type': 'text/plain',
                     },
                     body: JSON.stringify({
                         action: 'add',
@@ -630,32 +783,50 @@
                     })
                 });
 
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
                 const result = await response.json();
                 
                 if (result.success) {
+                    // Salva profilo operatore
                     profiliOperatori[operatore] = {
                         campo, magazzino, prodotto, tara: tara.toString()
                     };
 
+                    // Reset solo peso lordo
                     document.getElementById('pesoLordo').value = '';
+                    calcolaPesoNetto();
                     
                     mostraMessaggio(`✅ Pesata registrata per ${operatore}! Peso netto: ${pesoNetto}kg`, 'success');
                     
-                    caricaDatiCompleti();
+                    // Aggiorna statistiche automaticamente
+                    await aggiornaStats();
+                    
                 } else {
                     throw new Error(result.error || 'Errore durante il salvataggio');
                 }
             } catch (error) {
-                console.error('Errore:', error);
-                mostraMessaggio('❌ Errore durante il salvataggio: ' + error.message, 'error');
+                console.error('❌ Errore registrazione:', error);
+                
+                if (error.message.includes('Sistema occupato')) {
+                    mostraMessaggio('⏳ Sistema occupato, riprova tra 5 secondi...', 'error');
+                } else {
+                    mostraMessaggio('❌ Errore durante il salvataggio: ' + error.message, 'error');
+                }
             } finally {
                 btnRegistra.disabled = false;
                 btnRegistra.textContent = '📝 REGISTRA PESATA';
             }
         }
 
+        // CARICAMENTO DATI
         async function caricaDatiCompleti() {
-            if (!isConnected) return;
+            if (!isConnected) {
+                mostraMessaggio('❌ Non connesso!', 'error');
+                return;
+            }
 
             try {
                 aggiornaStatoSync('🔄 Caricamento...');
@@ -663,12 +834,16 @@
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
+                        'Content-Type': 'text/plain',
                     },
                     body: JSON.stringify({
                         action: 'getData'
                     })
                 });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
 
                 const data = await response.json();
                 
@@ -678,16 +853,22 @@
                     aggiornaHomeStats();
                     aggiornaElencoPesate();
                     aggiornaTotali();
+                    console.log(`📊 Caricati ${pesate.length} record`);
                 } else {
                     throw new Error(data.error || 'Errore caricamento dati');
                 }
             } catch (error) {
-                console.error('Errore caricamento:', error);
+                console.error('❌ Errore caricamento:', error);
                 aggiornaStatoSync('❌ Errore');
                 mostraMessaggio('Errore durante il caricamento dei dati', 'error');
             }
         }
 
+        async function aggiornaStats() {
+            await caricaDatiCompleti();
+        }
+
+        // AGGIORNAMENTO INTERFACCIA
         function aggiornaHomeStats() {
             const totalePesate = pesate.length;
             const totaleKg = pesate.reduce((sum, p) => sum + (p.pesoNetto || 0), 0);
@@ -725,28 +906,22 @@
             const totaleGenerale = pesate.reduce((sum, p) => sum + (p.pesoNetto || 0), 0);
             document.getElementById('totGen').textContent = Math.round(totaleGenerale);
 
+            // Calcola totali per categoria
             const totOperatori = {};
+            const totCampi = {};
+            const totMagazzini = {};
+            const totProdotti = {};
+
             pesate.forEach(p => {
                 totOperatori[p.operatore] = (totOperatori[p.operatore] || 0) + (p.pesoNetto || 0);
-            });
-            aggiornaSezioneTotal('totOperatori', totOperatori);
-
-            const totCampi = {};
-            pesate.forEach(p => {
                 totCampi[p.campo] = (totCampi[p.campo] || 0) + (p.pesoNetto || 0);
-            });
-            aggiornaSezioneTotal('totCampi', totCampi);
-
-            const totMagazzini = {};
-            pesate.forEach(p => {
                 totMagazzini[p.magazzino] = (totMagazzini[p.magazzino] || 0) + (p.pesoNetto || 0);
-            });
-            aggiornaSezioneTotal('totMagazzini', totMagazzini);
-
-            const totProdotti = {};
-            pesate.forEach(p => {
                 totProdotti[p.prodotto] = (totProdotti[p.prodotto] || 0) + (p.pesoNetto || 0);
             });
+
+            aggiornaSezioneTotal('totOperatori', totOperatori);
+            aggiornaSezioneTotal('totCampi', totCampi);
+            aggiornaSezioneTotal('totMagazzini', totMagazzini);
             aggiornaSezioneTotal('totProdotti', totProdotti);
         }
 
@@ -768,6 +943,7 @@
             `).join('');
         }
 
+        // GESTIONE PROFILI OPERATORI
         function caricaProfiloOperatore(idOperatore) {
             if (!idOperatore) return;
             
@@ -781,6 +957,9 @@
                 document.getElementById('prodotto').value = profilo.prodotto || '';
                 document.getElementById('tara').value = profilo.tara || '0';
                 
+                // Ricalcola peso netto se c'è un peso lordo
+                calcolaPesoNetto();
+                
                 mostraMessaggio(`✅ Profilo caricato per ${operatoreId}`, 'success');
                 setTimeout(() => {
                     document.getElementById('messaggiInserimento').innerHTML = '';
@@ -788,11 +967,16 @@
             }
         }
 
+        // UTILITÀ
         function formatData(timestamp) {
             if (!timestamp) return 'N/D';
-            const date = new Date(timestamp);
-            return date.toLocaleDateString('it-IT') + ' ' + 
-                   date.toLocaleTimeString('it-IT', {hour: '2-digit', minute: '2-digit'});
+            try {
+                const date = new Date(timestamp);
+                return date.toLocaleDateString('it-IT') + ' ' + 
+                       date.toLocaleTimeString('it-IT', {hour: '2-digit', minute: '2-digit'});
+            } catch (error) {
+                return 'Data non valida';
+            }
         }
 
         function mostraMessaggio(messaggio, tipo) {
@@ -804,9 +988,16 @@
             }, 5000);
         }
 
+        // NAVIGAZIONE
         function vaiA(schermata) {
+            // Controlla se le funzioni sono abilitate
+            if (!isConnected && ['inserimento', 'elenco', 'totali'].includes(schermata)) {
+                mostraMessaggio('❌ Configura prima la connessione a Google Sheets!', 'error');
+                mostraConfigPanel();
+                return;
+            }
+
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-            
             document.getElementById(schermata).classList.add('active');
             
             const titoli = {
@@ -826,6 +1017,7 @@
                 backBtn.style.display = 'block';
             }
 
+            // Carica dati quando necessario
             if ((schermata === 'elenco' || schermata === 'totali') && isConnected) {
                 caricaDatiCompleti();
             }
@@ -839,9 +1031,33 @@
             if (googleSheetUrl) {
                 window.open(googleSheetUrl, '_blank');
             } else {
-                alert('URL del foglio Google non disponibile');
+                alert('URL del foglio Google non disponibile. Configura prima la connessione.');
             }
         }
+
+        // GESTIONE ERRORI GLOBALI
+        window.addEventListener('error', function(e) {
+            console.error('💥 Errore JavaScript:', e.error);
+            aggiornaStatoSync('❌ Errore App');
+        });
+
+        window.addEventListener('unhandledrejection', function(e) {
+            console.error('💥 Promise rifiutata:', e.reason);
+            e.preventDefault();
+        });
+
+        // DEBUG
+        function debug() {
+            console.log('🐛 DEBUG INFO:');
+            console.log('API URL:', apiUrl);
+            console.log('Connected:', isConnected);
+            console.log('Pesate in memoria:', pesate.length);
+            console.log('Profili operatori:', Object.keys(profiliOperatori).length);
+            console.log('Google Sheet URL:', googleSheetUrl);
+        }
+
+        // Esponi debug per test
+        window.debug = debug;
     </script>
 </body>
 </html>
